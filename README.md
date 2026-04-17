@@ -1,7 +1,7 @@
 # Dynamic Payer Knowledge Base (DPKB) - CL_V2
 
 **BIG Consulting**
-Project Manager: Aditi Patil | Client: Arjav Parekh | April 2026
+Project Manager: Aditi Patil | April 2026
 
 ---
 
