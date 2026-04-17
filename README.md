@@ -1,6 +1,6 @@
 # Dynamic Payer Knowledge Base (DPKB) - CL_V2
 
-**BIG Consulting × Salud Revenue Partners**
+**BIG Consulting**
 Project Manager: Aditi Patil | Client: Arjav Parekh | April 2026
 
 ---
