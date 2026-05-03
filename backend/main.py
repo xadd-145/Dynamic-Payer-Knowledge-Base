@@ -1,4 +1,5 @@
 # backend/main.py
+import os
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -13,9 +14,14 @@ app = FastAPI(
     version="2.0.0",
 )
 
+allowed_origins = os.getenv(
+    "DPKB_ALLOWED_ORIGINS",
+    "http://localhost:5173"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[origin.strip() for origin in allowed_origins if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
