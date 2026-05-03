@@ -1,6 +1,6 @@
 # =============================================================================
 # constants.py - Single Source of Truth for ALL Enums and CHECK Constraints
-# DPKB CL_V2  |  
+# DPKB CL_V2  |  BIG x Salud Revenue Partners
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -81,9 +81,9 @@ DATE_QUERY_TYPE_CODES = (
 # CONFIDENCE TIERS  (Module B scoring output)
 # ---------------------------------------------------------------------------
 CONFIDENCE_TIER_CODES = (
-    'TIER_1',   # >= 75 pts - auto-publish
-    'TIER_2',   # 40-74 pts - Admin review queue
-    'TIER_3',   # < 40 pts  - SME escalation queue
+    'TIER_1',   # >= 75 pts - high-confidence candidate, still requires Admin/Arjav review
+    'TIER_2',   # 40-74 pts - Admin/Arjav review queue
+    'TIER_3',   # < 40 pts  - escalated review queue, SME candidate
 )
 
 # ---------------------------------------------------------------------------
@@ -108,7 +108,7 @@ CRAWLER_RUN_STATUS_CODES = (
 )
 
 # ---------------------------------------------------------------------------
-# USER ROLES  (V2 NEW - users.role)
+# USER ROLES  (V2 - users.role)
 # ---------------------------------------------------------------------------
 USER_ROLE = (
     'staff',
@@ -127,21 +127,46 @@ RESOLUTION_STATUS_CODES = (
 )
 
 # ---------------------------------------------------------------------------
-# AUTHORITY RANKS  (source_documents.authority_rank - higher = more authoritative)
+# AUTHORITY RANKS
 # ---------------------------------------------------------------------------
 AUTHORITY_RANK_MIN = 1
 AUTHORITY_RANK_MAX = 10
 
 # ---------------------------------------------------------------------------
 # HELPER: build SQL IN-list string from a tuple of constants
-# Usage: build_check_list(SOURCE_TYPE_CODES)  →  "'MANUAL','BULLETIN','GUIDELINE'"
 # ---------------------------------------------------------------------------
 def build_check_list(values: tuple) -> str:
     return ','.join(f"'{v}'" for v in values)
 
+# ---------------------------------------------------------------------------
+# EXPECTED TABLE COUNT
+# ---------------------------------------------------------------------------
+EXPECTED_TABLE_COUNT   = 15
+EXPECTED_TRIGGER_COUNT = 2
 
 # ---------------------------------------------------------------------------
-# EXPECTED TABLE COUNT - update whenever tables are added
+# CONFIDENCE SCORING CONFIG
+# Hybrid: structural (deterministic) + GPT-4o-mini semantic validation
+#
+# GOVERNANCE RULE:
+#   Confidence score is a ROUTING signal only.
+#   It does NOT approve or publish rules.
+#   Arjav/Admin reviews everything. Humans decide.
+#
+# SAFETY RULE:
+#   If semantic scoring is skipped (API unavailable or failed),
+#   the fragment is capped at SEMANTIC_TIER_CAP regardless of structural score.
+#   A high structural-only score CANNOT become TIER_1.
 # ---------------------------------------------------------------------------
-EXPECTED_TABLE_COUNT = 15
-EXPECTED_TRIGGER_COUNT = 2
+CONFIDENCE_WEIGHTS = {
+    "structural": 0.60,
+    "semantic":   0.40,
+}
+
+SEMANTIC_TIER_CAP  = "TIER_2"   # max tier when semantic is skipped
+TIER_1_THRESHOLD   = 75         # combined score >= 75 → TIER_1 (high-confidence candidate)
+TIER_2_THRESHOLD   = 40         # combined score >= 40 → TIER_2 (standard Admin review)
+                                 # combined score <  40 → TIER_3 (escalated)
+
+OPENAI_MODEL = "gpt-4o-mini"    # model used for semantic validation in Module B only
+                                 # NEVER used for retrieval — retrieval is deterministic SQL

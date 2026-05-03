@@ -63,6 +63,27 @@ export default function RuleCard({ rule }) {
         )}
       </div>
 
+      {/* Source Evidence */}
+      {rule.source_document_title && (
+        <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-500 space-y-1">
+          <p>
+            <span className="font-semibold">Source:</span>{" "}
+            {rule.source_document_title}
+            {rule.source_page && ` · p.${rule.source_page}`}
+          </p>
+          {rule.source_url && (
+            <a
+              href={rule.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block text-teal-600 hover:text-teal-800 underline font-semibold"
+            >
+              Open Source Document ↗
+            </a>
+          )}
+        </div>
+      )}
+
       {expanded && <VersionHistory versions={versions} />}
     </div>
   );

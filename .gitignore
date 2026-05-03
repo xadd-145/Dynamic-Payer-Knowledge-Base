@@ -1,0 +1,21 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Raw PDF files
+data/raw/
+*.pdf
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+
+# Local database runtime files
+db/*.db-shm
+db/*.db-wal

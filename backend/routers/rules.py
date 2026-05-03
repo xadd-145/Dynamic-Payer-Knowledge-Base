@@ -53,6 +53,42 @@ def resolve_rules(
             body.query_date,
             body.query_date_type,
         )
+
+    # Enrich rules with source evidence
+    rules_list = []
+    if isinstance(result, list):
+        rules_list = result
+    elif isinstance(result, dict) and "results" in result:
+        rules_list = result.get("results") or []
+    elif isinstance(result, dict):
+        rules_list = [result]
+
+    for rule in rules_list:
+        if not isinstance(rule, dict):
+            continue
+        rv_id = rule.get("rule_version_id")
+        if not rv_id:
+            continue
+        evidence = conn.execute("""
+            SELECT
+                sd.document_title,
+                sd.source_url,
+                sd.file_path_local,
+                rel.page_number_start,
+                rel.citation_text
+            FROM rule_evidence_links rel
+            JOIN source_documents sd
+              ON sd.source_document_id = rel.source_document_id
+            WHERE rel.rule_version_id = ?
+            LIMIT 1
+        """, (rv_id,)).fetchone()
+        if evidence:
+            rule["source_document_title"] = evidence[0]
+            rule["source_url"] = evidence[1]
+            rule["source_file_path"] = evidence[2]
+            rule["source_page"] = evidence[3]
+            rule["citation_text"] = evidence[4]
+
     return result
 
 
