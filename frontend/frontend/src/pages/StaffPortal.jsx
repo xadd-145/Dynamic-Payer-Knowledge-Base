@@ -24,7 +24,6 @@ export default function StaffPortal() {
     client.get("/rules/anchors").then(r => setAnchors(r.data));
   }, []);
 
-  // Poll notifications every 30s
   useEffect(() => {
     const poll = () => client.get("/notifications/unread")
       .then(r => setNotifCount(r.data.count)).catch(() => {});
@@ -65,10 +64,19 @@ export default function StaffPortal() {
           <p className="text-xs text-teal-200">NY Medicaid · UB-04 Facility Billing</p>
         </div>
         <div className="flex items-center gap-4">
+          {/* CHANGED: notification banner now has Refresh Now button */}
           {notifCount > 0 && (
-            <span className="bg-yellow-400 text-yellow-900 text-xs font-black px-3 py-1 rounded-full">
-              {notifCount} new rule{notifCount > 1 ? "s" : ""} published
-            </span>
+            <div className="flex items-center gap-2 bg-yellow-400 text-yellow-900 text-xs font-black px-3 py-1.5 rounded-full">
+              <span>{notifCount} new rule{notifCount > 1 ? "s" : ""} published — please refresh</span>
+              <button onClick={async () => {
+                try { await client.post("/notifications/read"); } catch {}
+                window.location.reload();
+              }}
+              className="underline hover:no-underline whitespace-nowrap"
+              >
+                Refresh Now
+              </button>
+            </div>
           )}
           <span className="text-xs text-teal-200 uppercase font-semibold">{role}</span>
           <button onClick={handleLogout}
@@ -79,7 +87,7 @@ export default function StaffPortal() {
       </div>
 
       <div className="max-w-6xl mx-auto px-6 py-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Left panel — query form */}
+        {/* Left panel */}
         <div className="md:col-span-1">
           <div className="bg-white rounded-xl shadow-sm border p-5 space-y-4">
             <h2 className="font-black text-gray-800 text-sm uppercase tracking-wide">
@@ -87,9 +95,7 @@ export default function StaffPortal() {
             </h2>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">
-                Billing Topic *
-              </label>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Billing Topic *</label>
               <select value={topicId} onChange={e => setTopicId(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
                 <option value="">Select topic...</option>
@@ -100,17 +106,13 @@ export default function StaffPortal() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">
-                Date *
-              </label>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Date *</label>
               <input type="date" value={date} onChange={e => setDate(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-2">
-                Date Type
-              </label>
+              <label className="block text-xs font-semibold text-gray-600 mb-2">Date Type</label>
               <div className="space-y-1">
                 {[["date_of_service", "Date of Service"], ["date_of_discharge", "Date of Discharge"]].map(([val, label]) => (
                   <label key={val} className="flex items-center gap-2 text-sm cursor-pointer">
@@ -123,9 +125,7 @@ export default function StaffPortal() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">
-                UB-04 Anchor Type (optional)
-              </label>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">UB-04 Anchor Type (optional)</label>
               <select value={anchorId} onChange={e => setAnchorId(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
                 <option value="">Any anchor type</option>
@@ -144,7 +144,7 @@ export default function StaffPortal() {
           </div>
         </div>
 
-        {/* Right panel — results */}
+        {/* Right panel */}
         <div className="md:col-span-2">
           {results === null && !loading && (
             <div className="flex items-center justify-center h-64 text-gray-400 text-sm">

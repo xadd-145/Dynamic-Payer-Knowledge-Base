@@ -15,8 +15,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
+from backend.utils.email_helper import (
+    notify_sme_escalation,
+    notify_admin_sme_response,
+)
+
 from backend.dependencies import get_db, require_role
 from modules.module_c.rule_publisher import publish_fragment, reject_fragment
+
 
 router = APIRouter()
 
@@ -59,12 +65,6 @@ def get_admin_queue(
     conn: sqlite3.Connection = Depends(get_db),
     current_user: dict = Depends(require_role("admin")),
 ):
-    """
-    Admin review queue.
-    Returns ALL pending fragments regardless of tier.
-    TIER_1 shown first (highest confidence = highest priority).
-    Route kept as /tier2 to avoid breaking existing frontend calls.
-    """
     rows = conn.execute("""
         SELECT pf.*, sd.document_title, sd.source_url
         FROM policy_fragments pf
@@ -93,12 +93,6 @@ def get_sme_queue(
     conn: sqlite3.Connection = Depends(get_db),
     current_user: dict = Depends(require_role("admin", "sme")),
 ):
-    """
-    SME review queue.
-    Shows ONLY fragments where Admin clicked Escalate to SME.
-    review_status = 'escalated' is set ONLY by the /escalate endpoint.
-    Pipeline never sets escalated. Fragment_writer always writes pending.
-    """
     rows = conn.execute("""
         SELECT pf.*, sd.document_title, sd.source_url
         FROM policy_fragments pf
@@ -126,10 +120,6 @@ def get_sme_responses(
     conn: sqlite3.Connection = Depends(get_db),
     current_user: dict = Depends(require_role("admin")),
 ):
-    """
-    Admin view of SME-reviewed fragments.
-    Admin remains final authority — must approve or reject after SME input.
-    """
     rows = conn.execute("""
         SELECT pf.*, sd.document_title, sd.source_url
         FROM policy_fragments pf
@@ -151,10 +141,6 @@ def approve(
     conn: sqlite3.Connection = Depends(get_db),
     current_user: dict = Depends(require_role("admin")),
 ):
-    """
-    Admin approves and publishes a fragment.
-    Admin only — SME cannot publish directly.
-    """
     result = publish_fragment(
         conn,
         policy_fragment_id   = body.policy_fragment_id,
@@ -181,14 +167,6 @@ def escalate(
     conn: sqlite3.Connection = Depends(get_db),
     current_user: dict = Depends(require_role("admin")),
 ):
-    """
-    Admin manually escalates a fragment to SME.
-    This is the ONLY way a fragment gets review_status = 'escalated'.
-    Pipeline never sets escalated. Fragment_writer always writes pending.
-    TIER_1 fragments are downgraded to TIER_2 on escalation
-    because TIER_1 is supposed to be strong — Admin escalating it
-    signals uncertainty, so it becomes a TIER_2 SME candidate.
-    """
     now = __import__('db_init').utc_now()
 
     conn.execute("""
@@ -208,11 +186,16 @@ def escalate(
         raise HTTPException(status_code=404, detail="Fragment not found.")
 
     conn.commit()
+    notify_sme_escalation(
+        fragment_id  = body.policy_fragment_id,
+        escalated_by = current_user["username"],
+        notes        = body.notes,
+    )
     return {"status": "escalated", "policy_fragment_id": body.policy_fragment_id}
 
 
 # ---------------------------------------------------------------------------
-# ADMIN REJECT (from pending queue or after SME response)
+# ADMIN REJECT
 # ---------------------------------------------------------------------------
 
 @router.post("/reject")
@@ -221,11 +204,6 @@ def reject(
     conn: sqlite3.Connection = Depends(get_db),
     current_user: dict = Depends(require_role("admin")),
 ):
-    """
-    Admin rejects a fragment.
-    Stays in DB as rejected for audit trail.
-    Admin only.
-    """
     return reject_fragment(
         conn,
         body.policy_fragment_id,
@@ -244,11 +222,6 @@ def sme_approve(
     conn: sqlite3.Connection = Depends(get_db),
     current_user: dict = Depends(require_role("sme")),
 ):
-    """
-    SME recommends approval.
-    Does NOT publish. Returns fragment to Admin SME Responses tab.
-    Admin must approve & publish after seeing SME recommendation.
-    """
     now = __import__('db_init').utc_now()
 
     conn.execute("""
@@ -268,6 +241,12 @@ def sme_approve(
         )
 
     conn.commit()
+    notify_admin_sme_response(
+        fragment_id    = body.policy_fragment_id,
+        recommendation = "approved",
+        sme_user       = current_user["username"],
+        notes          = body.notes,
+    )
     return {"status": "sme_approved", "policy_fragment_id": body.policy_fragment_id}
 
 
@@ -281,11 +260,6 @@ def sme_reject(
     conn: sqlite3.Connection = Depends(get_db),
     current_user: dict = Depends(require_role("sme")),
 ):
-    """
-    SME recommends rejection.
-    Does NOT finalize rejection. Returns fragment to Admin SME Responses tab.
-    Admin must confirm rejection.
-    """
     now = __import__('db_init').utc_now()
 
     conn.execute("""
@@ -305,4 +279,162 @@ def sme_reject(
         )
 
     conn.commit()
+    notify_admin_sme_response(
+        fragment_id    = body.policy_fragment_id,
+        recommendation = "rejected",
+        sme_user       = current_user["username"],
+        notes          = body.notes,
+    )
     return {"status": "sme_rejected", "policy_fragment_id": body.policy_fragment_id}
+
+
+# ---------------------------------------------------------------------------
+# ADMIN ACTIVITY LOG — NEW
+# Returns all fragments that have been actioned (anything not pending)
+# ---------------------------------------------------------------------------
+
+@router.get("/activity-log")
+def get_activity_log(
+    conn: sqlite3.Connection = Depends(get_db),
+    current_user: dict = Depends(require_role("admin")),
+):
+    rows = conn.execute("""
+        SELECT
+            pf.policy_fragment_id,
+            pf.review_status   AS action,
+            pf.reviewed_by,
+            sd.document_title,
+            pf.review_notes,
+            pf.reviewed_at,
+            pf.confidence_tier,
+            pf.confidence_score,
+            pf.page_number_start
+        FROM policy_fragments pf
+        JOIN source_documents sd
+          ON sd.source_document_id = pf.source_document_id
+        WHERE pf.review_status != 'pending'
+        ORDER BY pf.reviewed_at DESC
+    """).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# SME ACTIVITY LOG — NEW
+# Returns only this SME user's own recommendations
+# ---------------------------------------------------------------------------
+
+@router.get("/sme-activity-log")
+def get_sme_activity_log(
+    conn: sqlite3.Connection = Depends(get_db),
+    current_user: dict = Depends(require_role("sme")),
+):
+    rows = conn.execute("""
+        SELECT
+            pf.policy_fragment_id,
+            pf.review_status   AS action,
+            pf.reviewed_by,
+            sd.document_title,
+            pf.review_notes,
+            pf.reviewed_at,
+            pf.confidence_tier,
+            pf.confidence_score
+        FROM policy_fragments pf
+        JOIN source_documents sd
+          ON sd.source_document_id = pf.source_document_id
+        WHERE pf.review_status IN ('sme_approved', 'sme_rejected')
+          AND pf.reviewed_by = ?
+        ORDER BY pf.reviewed_at DESC
+    """, (current_user["username"],)).fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.post("/suggest")
+def suggest_metadata(
+    body: dict,
+    conn: sqlite3.Connection = Depends(get_db),
+    current_user: dict = Depends(require_role("admin")),
+):
+    import os, json
+    from openai import OpenAI
+
+    policy_fragment_id = body.get("policy_fragment_id")
+    fragment = conn.execute(
+        """SELECT pf.*, sd.document_title
+           FROM policy_fragments pf
+           JOIN source_documents sd ON sd.source_document_id = pf.source_document_id
+           WHERE pf.policy_fragment_id = ?""",
+        (policy_fragment_id,)
+    ).fetchone()
+
+    if not fragment:
+        raise HTTPException(status_code=404, detail="Fragment not found")
+
+    fragment = dict(fragment)
+
+    topics = conn.execute(
+        "SELECT topic_code FROM rule_topics WHERE is_active = 1 ORDER BY topic_code"
+    ).fetchall()
+    valid_topics = [t[0] for t in topics]
+
+    prompt = f"""You are a New York Medicaid facility billing expert.
+Analyze this policy fragment and suggest metadata for creating a billing rule.
+
+Fragment text:
+{fragment['fragment_text_raw']}
+
+Source document: {fragment['document_title']}
+Extracted effective date: {fragment['extracted_effective_start_date'] or 'Not detected'}
+
+Valid topic codes: {', '.join(valid_topics)}
+
+Respond ONLY with a JSON object, no markdown, no explanation:
+{{
+  "rule_code": "TOPIC-NNN format e.g. ER-001",
+  "rule_name": "Short descriptive name max 10 words",
+  "topic_code": "One of the valid topic codes above",
+  "effective_start_date": "YYYY-MM-DD or empty string if unknown",
+  "effective_end_date": "YYYY-MM-DD or empty string if not applicable",
+  "notes": "One sentence explaining the rule or empty string"
+}}"""
+
+    try:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            return {
+                "status": "partial",
+                "suggestion": {
+                    "rule_code": "", "rule_name": "", "topic_code": "",
+                    "effective_start_date": fragment["extracted_effective_start_date"] or "",
+                    "effective_end_date": "", "notes": "",
+                }
+            }
+
+        gpt = OpenAI(api_key=api_key)
+        response = gpt.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=300,
+        )
+
+        raw = response.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        suggestion = json.loads(raw)
+
+        if suggestion.get("topic_code") not in valid_topics:
+            suggestion["topic_code"] = ""
+
+        if not suggestion.get("effective_start_date"):
+            suggestion["effective_start_date"] = fragment["extracted_effective_start_date"] or ""
+
+        return {"status": "ok", "suggestion": suggestion}
+
+    except Exception:
+        return {
+            "status": "partial",
+            "suggestion": {
+                "rule_code": "", "rule_name": "", "topic_code": "",
+                "effective_start_date": fragment["extracted_effective_start_date"] or "",
+                "effective_end_date": "", "notes": "",
+            }
+        }

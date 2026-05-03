@@ -3,9 +3,10 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import client from "../api/client";
 
-// ---------------------------------------------------------------------------
-// Compact collapsible tier section for SME
-// ---------------------------------------------------------------------------
+const ACTION_BADGE = {
+  sme_approved: "bg-purple-100 text-purple-800",
+  sme_rejected: "bg-pink-100 text-pink-800",
+};
 
 function SMETierSection({ title, items, expandedId, setExpandedId, renderExpanded, color }) {
   if (items.length === 0) return null;
@@ -35,9 +36,7 @@ function SMETierSection({ title, items, expandedId, setExpandedId, renderExpande
                   key={item.policy_fragment_id}
                   className="border-b hover:bg-purple-50 cursor-pointer"
                   onClick={() =>
-                    setExpandedId(
-                      expandedId === item.policy_fragment_id ? null : item.policy_fragment_id
-                    )
+                    setExpandedId(expandedId === item.policy_fragment_id ? null : item.policy_fragment_id)
                   }
                 >
                   <td className="px-3 py-2 font-bold">{item.confidence_score}</td>
@@ -66,17 +65,15 @@ function SMETierSection({ title, items, expandedId, setExpandedId, renderExpande
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main SMEPortal
-// ---------------------------------------------------------------------------
-
 export default function SMEPortal() {
   const navigate = useNavigate();
-  const [fragments, setFragments] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [fragments, setFragments]   = useState([]);
+  const [smeLog, setSmeLog]         = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [activeTab, setActiveTab]   = useState("queue"); // "queue" | "activity_log"
   const [expandedId, setExpandedId] = useState(null);
-  const [notes, setNotes] = useState({});
-  const [msg, setMsg] = useState("");
+  const [notes, setNotes]           = useState({});
+  const [msg, setMsg]               = useState("");
 
   const loadQueue = () => {
     setLoading(true);
@@ -86,7 +83,17 @@ export default function SMEPortal() {
       .finally(() => setLoading(false));
   };
 
+  const loadSMELog = () => {
+    client.get("/fragments/sme-activity-log")
+      .then((r) => setSmeLog(r.data))
+      .catch(() => setSmeLog([]));
+  };
+
   useEffect(() => { loadQueue(); }, []);
+
+  useEffect(() => {
+    if (activeTab === "activity_log") loadSMELog();
+  }, [activeTab]);
 
   const handleSMEApprove = async (f) => {
     try {
@@ -97,8 +104,9 @@ export default function SMEPortal() {
       setMsg(`✓ Fragment #${f.policy_fragment_id} — Approval recommended. Admin will make the final publish decision.`);
       setExpandedId(null);
       loadQueue();
-    } catch {
-      setMsg("Error submitting recommendation.");
+    } catch (err) {
+      const detail = err?.response?.data?.detail || "Error submitting recommendation.";
+      setMsg(`Error: ${detail}`);
     }
   };
 
@@ -111,8 +119,9 @@ export default function SMEPortal() {
       setMsg(`Fragment #${f.policy_fragment_id} — Rejection recommended. Admin will confirm.`);
       setExpandedId(null);
       loadQueue();
-    } catch {
-      setMsg("Error submitting recommendation.");
+    } catch (err) {
+      const detail = err?.response?.data?.detail || "Error submitting recommendation.";
+      setMsg(`Error: ${detail}`);
     }
   };
 
@@ -159,16 +168,12 @@ export default function SMEPortal() {
       </div>
 
       <div className="flex gap-2">
-        <button
-          onClick={() => handleSMEApprove(f)}
-          className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2 rounded"
-        >
+        <button onClick={() => handleSMEApprove(f)}
+          className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2 rounded">
           Recommend Approval
         </button>
-        <button
-          onClick={() => handleSMEReject(f)}
-          className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-4 py-2 rounded"
-        >
+        <button onClick={() => handleSMEReject(f)}
+          className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-4 py-2 rounded">
           Recommend Rejection
         </button>
       </div>
@@ -186,57 +191,128 @@ export default function SMEPortal() {
           <h1 className="text-xl font-black">DPKB — SME Portal</h1>
           <p className="text-xs text-purple-200">Admin-Escalated Fragment Review</p>
         </div>
-        <button
-          onClick={() => { localStorage.clear(); navigate("/login"); }}
-          className="text-xs bg-purple-900 hover:bg-purple-800 px-3 py-1.5 rounded font-semibold"
-        >
+        <button onClick={() => { localStorage.clear(); navigate("/login"); }}
+          className="text-xs bg-purple-900 hover:bg-purple-800 px-3 py-1.5 rounded font-semibold">
           Sign Out
         </button>
       </div>
 
-      <div className="max-w-6xl mx-auto px-6 py-6">
-        {/* Governance notice */}
-        <div className="mb-5 bg-purple-50 border border-purple-200 rounded-xl px-5 py-4 text-sm text-purple-800">
-          <p className="font-black mb-1">SME Role — Expert Interpretation Only</p>
-          <p className="text-xs text-purple-700">
-            You see only fragments Admin has explicitly escalated. Your recommendations go back to Admin for final publish or reject decision. You do not publish directly.
-          </p>
+      {/* Tabs */}
+      <div className="border-b bg-white px-6">
+        <div className="flex gap-6 max-w-6xl mx-auto">
+          <button
+            onClick={() => setActiveTab("queue")}
+            className={`text-sm font-bold py-3 border-b-2 transition-colors ${
+              activeTab === "queue" ? "border-purple-600 text-purple-700" : "border-transparent text-gray-400 hover:text-gray-600"
+            }`}
+          >
+            Escalated Queue
+            <span className="ml-2 bg-purple-100 text-purple-700 text-xs px-1.5 py-0.5 rounded font-semibold">
+              {fragments.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab("activity_log")}
+            className={`text-sm font-bold py-3 border-b-2 transition-colors ${
+              activeTab === "activity_log" ? "border-gray-700 text-gray-800" : "border-transparent text-gray-400 hover:text-gray-600"
+            }`}
+          >
+            My Activity Log
+            <span className="ml-2 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded font-semibold">
+              {smeLog.length}
+            </span>
+          </button>
         </div>
+      </div>
 
-        {msg && (
-          <div className="mb-4 bg-purple-50 border border-purple-200 text-purple-800 px-4 py-3 rounded-lg text-sm font-semibold">
-            {msg}
-          </div>
+      <div className="max-w-6xl mx-auto px-6 py-6">
+
+        {/* QUEUE TAB */}
+        {activeTab === "queue" && (
+          <>
+            <div className="mb-5 bg-purple-50 border border-purple-200 rounded-xl px-5 py-4 text-sm text-purple-800">
+              <p className="font-black mb-1">SME Role — Expert Interpretation Only</p>
+              <p className="text-xs text-purple-700">
+                You see only fragments Admin has explicitly escalated. Your recommendations go back to Admin for final publish or reject decision. You do not publish directly.
+              </p>
+            </div>
+
+            {msg && (
+              <div className="mb-4 bg-purple-50 border border-purple-200 text-purple-800 px-4 py-3 rounded-lg text-sm font-semibold">
+                {msg}
+              </div>
+            )}
+
+            {loading && <p className="text-gray-400 text-sm">Loading SME queue...</p>}
+
+            {!loading && fragments.length === 0 && (
+              <div className="bg-white rounded-xl border p-8 text-center">
+                <p className="text-gray-500 font-semibold">No fragments escalated to SME.</p>
+                <p className="text-xs text-gray-400 mt-1">Admin must escalate fragments before they appear here.</p>
+              </div>
+            )}
+
+            <SMETierSection title="TIER 2 — Escalated by Admin" items={tier2}
+              expandedId={expandedId} setExpandedId={setExpandedId}
+              renderExpanded={renderExpandedCard} color="bg-yellow-100 text-yellow-900" />
+
+            <SMETierSection title="TIER 3 — Escalated by Admin" items={tier3}
+              expandedId={expandedId} setExpandedId={setExpandedId}
+              renderExpanded={renderExpandedCard} color="bg-red-100 text-red-900" />
+          </>
         )}
 
-        {loading && <p className="text-gray-400 text-sm">Loading SME queue...</p>}
-
-        {!loading && fragments.length === 0 && (
-          <div className="bg-white rounded-xl border p-8 text-center">
-            <p className="text-gray-500 font-semibold">No fragments escalated to SME.</p>
-            <p className="text-xs text-gray-400 mt-1">
-              Admin must escalate fragments before they appear here.
-            </p>
-          </div>
+        {/* ACTIVITY LOG TAB — NEW */}
+        {activeTab === "activity_log" && (
+          <>
+            {msg && (
+              <div className="mb-4 bg-purple-50 border border-purple-200 text-purple-800 px-4 py-3 rounded-lg text-sm font-semibold">
+                {msg}
+              </div>
+            )}
+            {smeLog.length === 0 && (
+              <div className="bg-white rounded-xl border p-8 text-center">
+                <p className="text-gray-500 font-semibold">No activity yet.</p>
+                <p className="text-xs text-gray-400 mt-1">Your recommendations will appear here after you review escalated fragments.</p>
+              </div>
+            )}
+            {smeLog.length > 0 && (
+              <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+                <div className="px-5 py-3 bg-purple-800 text-white font-black text-sm">
+                  My SME Recommendation History
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-500 text-left border-b">
+                        <th className="px-3 py-2">Fragment ID</th>
+                        <th className="px-3 py-2">Recommendation</th>
+                        <th className="px-3 py-2">Source PDF</th>
+                        <th className="px-3 py-2">Notes</th>
+                        <th className="px-3 py-2">Timestamp</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {smeLog.map((row) => (
+                        <tr key={row.policy_fragment_id} className="border-b hover:bg-gray-50">
+                          <td className="px-3 py-2 text-gray-400">#{row.policy_fragment_id}</td>
+                          <td className="px-3 py-2">
+                            <span className={`px-2 py-0.5 rounded text-xs font-black ${ACTION_BADGE[row.action] || "bg-gray-100 text-gray-700"}`}>
+                              {row.action === "sme_approved" ? "RECOMMENDED APPROVAL" : "RECOMMENDED REJECTION"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">{row.document_title}</td>
+                          <td className="px-3 py-2 text-gray-500 max-w-xs truncate">{row.review_notes || "—"}</td>
+                          <td className="px-3 py-2 text-gray-400">{row.reviewed_at || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
         )}
-
-        <SMETierSection
-          title="TIER 2 — Escalated by Admin"
-          items={tier2}
-          expandedId={expandedId}
-          setExpandedId={setExpandedId}
-          renderExpanded={renderExpandedCard}
-          color="bg-yellow-100 text-yellow-900"
-        />
-
-        <SMETierSection
-          title="TIER 3 — Escalated by Admin"
-          items={tier3}
-          expandedId={expandedId}
-          setExpandedId={setExpandedId}
-          renderExpanded={renderExpandedCard}
-          color="bg-red-100 text-red-900"
-        />
       </div>
     </div>
   );
