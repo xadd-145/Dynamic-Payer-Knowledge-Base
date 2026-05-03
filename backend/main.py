@@ -37,3 +37,15 @@ app.include_router(crawler.router,       prefix="/api/crawler",       tags=["cra
 @app.get("/api/health")
 def health_check():
     return {"status": "ok"}
+
+
+@app.get("/api/debug/users")
+def debug_users():
+    import sqlite3, os
+    try:
+        conn = sqlite3.connect("db/dpkb.db")
+        users = conn.execute("SELECT username, role FROM users").fetchall()
+        conn.close()
+        return {"users": users, "cwd": os.getcwd()}
+    except Exception as e:
+        return {"error": str(e), "cwd": os.getcwd()}
