@@ -10,6 +10,6 @@ pymupdf==1.25.5
 requests==2.32.3
 beautifulsoup4==4.13.3
 python-dateutil==2.9.0
-spacy==3.8.4
+spacy
 openai
 python-dotenv
